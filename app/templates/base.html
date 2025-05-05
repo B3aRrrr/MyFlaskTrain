@@ -13,7 +13,7 @@
 {% endblock %}
 
 {% block content %}
-{% if current_user.is_authenticated() %}
+{% if current_user.is_authenticated %}
 <li>
     <a href="{{ url_for('main.user', username=curren_user.username) }}">
         Profile
