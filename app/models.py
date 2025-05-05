@@ -4,6 +4,8 @@ from flask import current_app
 from flask_login import UserMixin,AnonymousUserMixin
 from . import db, login_manager
 from datetime import datetime
+import hashlib
+from flask import request
 
 class Permission:
     FOLLOW = 0x01
@@ -57,8 +59,10 @@ class User(UserMixin, db.Model):
     name = db.Column(db.String(64))
     location = db.Column(db.String(64))
     about_me = db.Column(db.Text())
-    member_since = db.Column(db.DateTime(),default=datetime.now(datetime.timezone.utc))
-    last_seen = db.Column(db.DateTime(),default=datetime.now(datetime.timezone.utc))
+    member_since = db.Column(db.DateTime(),default=datetime.utcnow())
+    last_seen = db.Column(db.DateTime(),default=datetime.utcnow())
+
+    avatar_hash = db.Column(db.String(32))
     #endregion
 
     #region Methods
@@ -69,7 +73,29 @@ class User(UserMixin, db.Model):
                 self.role = Role.query.filter_by(permissions=0xff).first()
             if self.role is None:
                 self.role = Role.query.filter_by(default=True).first()
+        if self.email is not None and self.avatar_hash is None:
+            self.avatar_hash = hashlib.md5(
+                self.email.encode('utf-8')).hexdigest()
 
+    def change_email(self, token):
+        s = Serializer(current_app.config['SECRET_KEY'])
+        try:
+            data = s.loads(token)
+        except:
+            return False
+        if data.get('change_email') != self.id:
+            return False
+        new_email = data.get('new_email')
+        if new_email is None:
+            return False
+        if self.query.filter_by(email=new_email).first() is not None:
+            return False
+        self.email = new_email
+        self.avatar_hash = hashlib.md5(
+            self.email.encode('utf-8')).hexdigest()
+        db.session.add(self)
+        return True
+    
     def can(self,permissions):
         return self.role is not None and \
             (self.role.permissions & permissions) == permissions
@@ -77,6 +103,14 @@ class User(UserMixin, db.Model):
     def is_administrator(self):
         return self.can(Permission.ADMINISTER)
     
+    def gravatar(self,size=100,default='identicon',rating='g'):
+        if request.is_secure:
+            url = 'https://secure.gravatar.com/avatar'
+        else:
+            url = 'http://www.gravatar.com/avatar'
+        hash = self.avatar_hash or hashlib.md5(self.email.encode('utf-8')).hexdigest()
+        return f'{url}/{hash}?s={size}&d={default}&r={rating}'
+
     @property
     def password(self):
         raise AttributeError('password is not a readable attribute')
